@@ -1,670 +1,394 @@
-// ChatGPT Thread Jump - Content Script (CSP Safe)
-console.log('[CTN] Script loaded - CSP Safe Version');
+/* ChatGPT Thread Jump - ダークモード対応スタイル */
 
-// Global state
-let panel = null;
-let jumpButton = null;
-let currentTab = 'keywords';
-let currentHighlights = [];
-let currentHighlightIndex = -1;
-let isResizing = false;
-
-// Utility functions
-function debug(...args) {
-  console.debug('[CTN]', ...args);
+/* Jump Button Styles */
+.ctn-jump-button {
+  position: fixed !important;
+  bottom: 120px !important;
+  right: 20px !important;
+  width: 50px !important;
+  height: 50px !important;
+  background: #2563eb !important;
+  border: none !important;
+  border-radius: 25px !important;
+  color: white !important;
+  cursor: pointer !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 24px !important;
+  line-height: 1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
 }
 
-function isDarkMode() {
-  return document.documentElement.classList.contains('dark') ||
-         document.body.classList.contains('dark') ||
-         getComputedStyle(document.documentElement).getPropertyValue('color-scheme').includes('dark');
+.ctn-jump-button:hover {
+  background: #1d4ed8 !important;
+  transform: scale(1.05) !important;
 }
 
-// Storage functions
-async function saveSettings(settings) {
-  try {
-    await chrome.storage.local.set(settings);
-    debug('Settings saved:', settings);
-  } catch (error) {
-    debug('Failed to save settings:', error);
+/* Panel Styles */
+.ctn-panel {
+  position: fixed !important;
+  bottom: 180px !important;
+  right: 20px !important;
+  width: 400px !important;
+  height: 500px !important;
+  background: white !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2) !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  resize: both !important;
+  min-width: 300px !important;
+  min-height: 300px !important;
+  max-width: 80vw !important;
+  max-height: 80vh !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* Dark Mode Panel */
+.ctn-panel.dark {
+  background: #0d1117 !important; /* GitHub風の非常に暗い背景 */
+  border-color: #21262d !important;
+  color: #f0f6fc !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Panel Header */
+.ctn-panel-header {
+  padding: 16px !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  background: #f9fafb !important;
+  flex-shrink: 0 !important;
+}
+
+.ctn-panel.dark .ctn-panel-header {
+  background: #161b22 !important; /* 少し明るい暗色 */
+  border-bottom-color: #21262d !important;
+}
+
+/* Tabs */
+.ctn-tabs {
+  display: flex !important;
+  gap: 4px !important;
+  margin-bottom: 12px !important;
+}
+
+.ctn-tab {
+  padding: 4px 8px !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+  background: white !important;
+  color: #374151 !important;
+  transition: all 0.2s ease !important;
+}
+
+.ctn-tab:hover {
+  background: #f3f4f6 !important;
+}
+
+.ctn-tab.active {
+  background: #10a37f !important;
+  color: white !important;
+  border-color: #10a37f !important;
+}
+
+.ctn-panel.dark .ctn-tab {
+  background: #21262d !important; /* より暗い背景 */
+  color: #f0f6fc !important;
+  border-color: #30363d !important;
+}
+
+.ctn-panel.dark .ctn-tab:hover {
+  background: #30363d !important;
+}
+
+.ctn-panel.dark .ctn-tab.active {
+  background: #10a37f !important;
+  color: white !important;
+  border-color: #10a37f !important;
+}
+
+/* Search Container */
+.ctn-search-container {
+  position: relative !important;
+  width: 100% !important;
+}
+
+.ctn-search-input {
+  width: 100% !important;
+  padding: 8px 12px !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 6px !important;
+  font-size: 14px !important;
+  outline: none !important;
+  background: white !important;
+  color: #111827 !important;
+  box-sizing: border-box !important;
+}
+
+.ctn-search-input:focus {
+  border-color: #10a37f !important;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1) !important;
+}
+
+.ctn-panel.dark .ctn-search-input {
+  background: #21262d !important; /* より暗い背景 */
+  border-color: #30363d !important;
+  color: #f0f6fc !important;
+}
+
+.ctn-panel.dark .ctn-search-input:focus {
+  border-color: #10a37f !important;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2) !important;
+}
+
+/* Panel Body */
+.ctn-panel-body {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  padding: 12px !important;
+}
+
+/* Snippet List */
+.ctn-snippet-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+/* No Results */
+.ctn-no-results {
+  text-align: center !important;
+  color: #6b7280 !important;
+  font-style: italic !important;
+  padding: 32px !important;
+  font-size: 14px !important;
+}
+
+.ctn-panel.dark .ctn-no-results {
+  color: #8b949e !important;
+}
+
+/* Snippet Items */
+.ctn-snippet-item {
+  padding: 12px !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  background: white !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  transition: all 0.2s ease !important;
+  color: #111827 !important; /* ライトモードは黒文字 */
+}
+
+.ctn-snippet-item:hover {
+  background: #f3f4f6 !important;
+  border-color: #10a37f !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.ctn-panel.dark .ctn-snippet-item {
+  background: #1f2937 !important; /* より暗い背景 */
+  border-color: #374151 !important;
+  color: #f9fafb !important; /* ダークモードは白文字 */
+}
+
+.ctn-panel.dark .ctn-snippet-item:hover {
+  background: #111827 !important; /* ホバー時はさらに暗く */
+  border-color: #10a37f !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  color: #ffffff !important; /* ホバー時は純白 */
+}
+
+/* Snippet Labels */
+.ctn-snippet-label {
+  display: inline-block !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  font-size: 10px !important;
+  font-weight: bold !important;
+  margin-right: 8px !important;
+  margin-bottom: 4px !important;
+}
+
+.ctn-snippet-label.user {
+  background: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+.ctn-snippet-label.assistant {
+  background: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+/* Snippet Text */
+.ctn-snippet-text {
+  display: block !important;
+  color: #111827 !important; /* ライトモードは黒文字 */
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+}
+
+.ctn-panel.dark .ctn-snippet-text {
+  color: #f9fafb !important; /* ダークモードは白文字 */
+}
+
+/* Search Highlight */
+.ctn-search-highlight {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  padding: 1px 2px !important;
+  border-radius: 2px !important;
+  font-weight: 500 !important;
+}
+
+.ctn-panel.dark .ctn-search-highlight {
+  background: #fbbf24 !important;
+  color: #1f2937 !important; /* ダークモードでハイライト内は暗い文字 */
+}
+
+/* Resize Handle */
+.ctn-resize-handle {
+  position: absolute !important;
+  bottom: 0 !important;
+  right: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
+  cursor: se-resize !important;
+  background: linear-gradient(-45deg, 
+    transparent 0%, transparent 25%, 
+    #ccc 25%, #ccc 30%, 
+    transparent 30%, transparent 50%, 
+    #ccc 50%, #ccc 55%, 
+    transparent 55%, transparent 75%, 
+    #ccc 75%, #ccc 80%, 
+    transparent 80%) !important;
+  border-bottom-right-radius: 12px !important;
+  z-index: 10 !important;
+  pointer-events: auto !important;
+}
+
+.ctn-resize-handle:hover {
+  background: linear-gradient(-45deg, 
+    transparent 0%, transparent 25%, 
+    #999 25%, #999 30%, 
+    transparent 30%, transparent 50%, 
+    #999 50%, #999 55%, 
+    transparent 55%, transparent 75%, 
+    #999 75%, #999 80%, 
+    transparent 80%) !important;
+}
+
+.ctn-panel.dark .ctn-resize-handle {
+  background: linear-gradient(-45deg, 
+    transparent 0%, transparent 25%, 
+    #6b7280 25%, #6b7280 30%, 
+    transparent 30%, transparent 50%, 
+    #6b7280 50%, #6b7280 55%, 
+    transparent 55%, transparent 75%, 
+    #6b7280 75%, #6b7280 80%, 
+    transparent 80%) !important;
+}
+
+.ctn-panel.dark .ctn-resize-handle:hover {
+  background: linear-gradient(-45deg, 
+    transparent 0%, transparent 25%, 
+    #9ca3af 25%, #9ca3af 30%, 
+    transparent 30%, transparent 50%, 
+    #9ca3af 50%, #9ca3af 55%, 
+    transparent 55%, transparent 75%, 
+    #9ca3af 75%, #9ca3af 80%, 
+    transparent 80%) !important;
+}
+
+/* Search Indicator */
+.ctn-search-indicator {
+  position: absolute !important;
+  right: 8px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 16px !important;
+  height: 16px !important;
+  opacity: 0.5 !important;
+  pointer-events: none !important;
+}
+
+/* Scrollbar Styling */
+.ctn-panel-body::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.ctn-panel-body::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+  border-radius: 4px !important;
+}
+
+.ctn-panel-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+  border-radius: 4px !important;
+}
+
+.ctn-panel-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+
+.ctn-panel.dark .ctn-panel-body::-webkit-scrollbar-track {
+  background: #0d1117 !important;
+}
+
+.ctn-panel.dark .ctn-panel-body::-webkit-scrollbar-thumb {
+  background: #30363d !important;
+}
+
+.ctn-panel.dark .ctn-panel-body::-webkit-scrollbar-thumb:hover {
+  background: #484f58 !important;
+}
+
+/* Animation for panel opening */
+.ctn-panel {
+  animation: ctn-panel-fade-in 0.2s ease-out !important;
+}
+
+@keyframes ctn-panel-fade-in {
+  from {
+    opacity: 0 !important;
+    transform: translateY(20px) scale(0.95) !important;
+  }
+  to {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
   }
 }
 
-async function loadSettings() {
-  try {
-    const result = await chrome.storage.local.get(['panelWidth', 'panelHeight']);
-    const settings = {
-      panelWidth: result.panelWidth || 400,
-      panelHeight: result.panelHeight || 500
-    };
-    debug('Settings loaded:', settings);
-    return settings;
-  } catch (error) {
-    debug('Failed to load settings:', error);
-    return { panelWidth: 400, panelHeight: 500 };
-  }
+/* Focus styles for accessibility */
+.ctn-tab:focus,
+.ctn-search-input:focus,
+.ctn-snippet-item:focus {
+  outline: 2px solid #10a37f !important;
+  outline-offset: 2px !important;
 }
 
-// Message extraction functions
-function getMessageElements() {
-  const messages = [];
-  const messageElements = document.querySelectorAll('[data-message-id]');
-  
-  debug('Found message elements:', messageElements.length);
-  
-  messageElements.forEach((el, index) => {
-    try {
-      const messageId = el.getAttribute('data-message-id');
-      if (!messageId) return;
-      
-      let role = el.getAttribute('data-message-author-role');
-      
-      if (!role) {
-        const userIndicators = el.querySelector('[data-testid="conversation-turn-user"]') || 
-                              el.querySelector('.font-semibold');
-        const assistantIndicators = el.querySelector('[data-testid="conversation-turn-assistant"]');
-        
-        if (userIndicators) {
-          role = 'user';
-        } else if (assistantIndicators) {
-          role = 'assistant';
-        } else {
-          const textContent = el.textContent.trim();
-          if (textContent.length > 0) {
-            role = index % 2 === 0 ? 'user' : 'assistant';
-          }
-        }
-      }
-      
-      if (!role) return;
-      
-      const textContent = extractTextContent(el);
-      if (textContent.trim().length === 0) return;
-      
-      messages.push({
-        element: el,
-        messageId: messageId,
-        role: role,
-        text: textContent,
-        snippet: textContent.slice(0, 140).trim() + (textContent.length > 140 ? '...' : '')
-      });
-    } catch (error) {
-      debug('Error processing message element:', error);
-    }
-  });
-  
-  debug('Processed messages:', messages.length);
-  return messages;
-}
-
-function extractTextContent(element) {
-  const clone = element.cloneNode(true);
-  
-  const uiSelectors = [
-    '.ctn-panel',
-    '.ctn-jump-button',
-    'button[aria-label]',
-    '[role="button"]',
-    '.copy-button',
-    '.regenerate-button'
-  ];
-  
-  uiSelectors.forEach(selector => {
-    const elements = clone.querySelectorAll(selector);
-    elements.forEach(el => el.remove());
-  });
-  
-  return clone.textContent || '';
-}
-
-// Scroll functions
-function findScrollableRoot(target) {
-  debug('Finding scrollable root for:', target);
-  
-  const candidates = [
-    document.querySelector('#__next main'),
-    document.querySelector('main'),
-    document.scrollingElement,
-    document.documentElement,
-    document.body
-  ];
-  
-  let parent = target.parentElement;
-  while (parent && parent !== document.body) {
-    candidates.unshift(parent);
-    parent = parent.parentElement;
+/* Mobile responsive adjustments */
+@media (max-width: 480px) {
+  .ctn-panel {
+    width: calc(100vw - 40px) !important;
+    height: calc(100vh - 200px) !important;
+    right: 20px !important;
+    bottom: 80px !important;
   }
   
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    
-    try {
-      const style = getComputedStyle(candidate);
-      const overflowY = style.overflowY;
-      
-      if (candidate.scrollHeight > candidate.clientHeight && 
-          (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')) {
-        
-        const originalScrollTop = candidate.scrollTop;
-        candidate.scrollTop += 1;
-        const canScroll = candidate.scrollTop !== originalScrollTop;
-        candidate.scrollTop = originalScrollTop;
-        
-        if (canScroll) {
-          debug('Found scrollable root:', candidate);
-          return candidate;
-        }
-      }
-    } catch (error) {
-      debug('Error testing scroll candidate:', error);
-    }
-  }
-  
-  debug('Using window as fallback scroll root');
-  return window;
-}
-
-function scrollToElement(element) {
-  debug('Scrolling to element:', element);
-  
-  const scrollRoot = findScrollableRoot(element);
-  const targetRect = element.getBoundingClientRect();
-  
-  if (scrollRoot === window) {
-    const offsetTop = targetRect.top + window.pageYOffset;
-    const windowCenter = window.innerHeight / 2;
-    const scrollPosition = offsetTop - windowCenter;
-    
-    window.scrollTo({
-      top: Math.max(0, scrollPosition),
-      behavior: 'smooth'
-    });
-  } else {
-    const containerRect = scrollRoot.getBoundingClientRect();
-    const relativeTop = targetRect.top - containerRect.top;
-    const scrollCenter = scrollRoot.clientHeight / 2;
-    const newScrollTop = scrollRoot.scrollTop + relativeTop - scrollCenter;
-    
-    scrollRoot.scrollTo({
-      top: Math.max(0, newScrollTop),
-      behavior: 'smooth'
-    });
+  .ctn-jump-button {
+    bottom: 20px !important;
   }
 }
-
-// Highlight functions - simplified to avoid CSP issues
-function clearHighlights() {
-  currentHighlights.forEach(highlight => {
-    const parent = highlight.parentNode;
-    if (parent) {
-      parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
-      parent.normalize();
-    }
-  });
-  currentHighlights = [];
-  currentHighlightIndex = -1;
-}
-
-// Panel content update - CSP safe version
-function updatePanelContent() {
-  const snippetList = panel.querySelector('.ctn-snippet-list');
-  const searchInput = panel.querySelector('.ctn-search-input');
-  
-  if (!snippetList || !searchInput) {
-    debug('Panel elements not found');
-    return;
-  }
-  
-  const searchTerm = searchInput.value.toLowerCase().trim();
-  debug('Updating panel content. Search term:', searchTerm, 'Current tab:', currentTab);
-  
-  snippetList.innerHTML = '';
-  
-  const messages = getMessageElements();
-  let filteredMessages = messages;
-  
-  debug('Total messages found:', messages.length);
-  
-  // Filter by tab type first
-  if (currentTab === 'user') {
-    filteredMessages = messages.filter(msg => msg.role === 'user');
-    debug('Filtered to user messages:', filteredMessages.length);
-  } else if (currentTab === 'assistant') {
-    filteredMessages = messages.filter(msg => msg.role === 'assistant');
-    debug('Filtered to assistant messages:', filteredMessages.length);
-  }
-  
-  // Apply search filter - simple string matching only
-  if (searchTerm) {
-    const beforeSearch = filteredMessages.length;
-    filteredMessages = filteredMessages.filter(msg => {
-      return msg.text.toLowerCase().includes(searchTerm) || 
-             msg.snippet.toLowerCase().includes(searchTerm);
-    });
-    debug(`Search filter applied. Before: ${beforeSearch}, After: ${filteredMessages.length}`);
-  }
-  
-  if (filteredMessages.length === 0) {
-    const noResultsMsg = searchTerm ? 
-      'No messages found containing "' + searchInput.value + '"' : 
-      'No messages found';
-    snippetList.innerHTML = '<div class="ctn-no-results">' + noResultsMsg + '</div>';
-    debug('No results to display');
-    return;
-  }
-  
-  debug('Displaying', filteredMessages.length, 'messages');
-  
-  // Create items without complex string operations
-  filteredMessages.forEach((message, index) => {
-    const item = document.createElement('div');
-    item.className = 'ctn-snippet-item';
-    
-    const label = message.role === 'user' ? 'You' : 'AI';
-    const labelClass = message.role === 'user' ? 'user' : 'assistant';
-    
-    // Create label element
-    const labelElement = document.createElement('span');
-    labelElement.className = 'ctn-snippet-label ' + labelClass;
-    labelElement.textContent = '[' + label + ']';
-    
-    // Create snippet text element
-    const textElement = document.createElement('span');
-    textElement.className = 'ctn-snippet-text';
-    
-    // Simple highlighting without regex
-    let displayText = message.snippet;
-    if (searchTerm) {
-      const lowerSnippet = message.snippet.toLowerCase();
-      const index = lowerSnippet.indexOf(searchTerm);
-      if (index !== -1) {
-        const before = message.snippet.substring(0, index);
-        const match = message.snippet.substring(index, index + searchTerm.length);
-        const after = message.snippet.substring(index + searchTerm.length);
-        
-        const beforeText = document.createTextNode(before);
-        const highlightElement = document.createElement('mark');
-        highlightElement.className = 'ctn-search-highlight';
-        highlightElement.textContent = match;
-        const afterText = document.createTextNode(after);
-        
-        textElement.appendChild(beforeText);
-        textElement.appendChild(highlightElement);
-        textElement.appendChild(afterText);
-      } else {
-        textElement.textContent = displayText;
-      }
-    } else {
-      textElement.textContent = displayText;
-    }
-    
-    item.appendChild(labelElement);
-    item.appendChild(textElement);
-    
-    item.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    });
-    
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      
-      debug('Clicking snippet, jumping to message:', message.messageId);
-      scrollToElement(message.element);
-      
-      requestAnimationFrame(() => {
-        closePanel();
-      });
-    });
-    
-    snippetList.appendChild(item);
-  });
-  
-  debug('Panel content updated successfully');
-}
-
-// Panel creation
-async function createPanel() {
-  const settings = await loadSettings();
-  
-  panel = document.createElement('div');
-  panel.className = 'ctn-panel';
-  if (isDarkMode()) {
-    panel.classList.add('dark');
-  }
-  
-  panel.style.width = settings.panelWidth + 'px';
-  panel.style.height = settings.panelHeight + 'px';
-  
-  // Create header
-  const header = document.createElement('div');
-  header.className = 'ctn-panel-header';
-  
-  // Create tabs
-  const tabsContainer = document.createElement('div');
-  tabsContainer.className = 'ctn-tabs';
-  
-  const tabs = [
-    { id: 'keywords', text: 'All', active: true },
-    { id: 'user', text: 'My Posts', active: false },
-    { id: 'assistant', text: 'AI', active: false }
-  ];
-  
-  tabs.forEach(tabInfo => {
-    const tab = document.createElement('button');
-    tab.className = 'ctn-tab' + (tabInfo.active ? ' active' : '');
-    tab.setAttribute('data-tab', tabInfo.id);
-    tab.textContent = tabInfo.text;
-    tabsContainer.appendChild(tab);
-  });
-  
-  // Create search container
-  const searchContainer = document.createElement('div');
-  searchContainer.className = 'ctn-search-container';
-  
-  const searchInput = document.createElement('input');
-  searchInput.type = 'text';
-  searchInput.className = 'ctn-search-input';
-  searchInput.placeholder = 'Filter all messages...';
-  
-  const searchIndicator = document.createElement('div');
-  searchIndicator.className = 'ctn-search-indicator';
-  
-  searchContainer.appendChild(searchInput);
-  searchContainer.appendChild(searchIndicator);
-  
-  header.appendChild(tabsContainer);
-  header.appendChild(searchContainer);
-  
-  // Create body
-  const body = document.createElement('div');
-  body.className = 'ctn-panel-body';
-  
-  const snippetList = document.createElement('div');
-  snippetList.className = 'ctn-snippet-list';
-  body.appendChild(snippetList);
-  
-  // Create resize handle
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = 'ctn-resize-handle';
-  
-  panel.appendChild(header);
-  panel.appendChild(body);
-  panel.appendChild(resizeHandle);
-  
-  document.body.appendChild(panel);
-  
-  setupPanelEventListeners();
-  setupResizeHandle();
-  updatePanelContent();
-}
-
-function setupPanelEventListeners() {
-  // Tab switching
-  panel.querySelectorAll('.ctn-tab').forEach(tab => {
-    tab.addEventListener('click', (e) => {
-      e.stopPropagation();
-      switchTab(e.target.getAttribute('data-tab'));
-    });
-  });
-  
-  // Search input
-  const searchInput = panel.querySelector('.ctn-search-input');
-  
-  searchInput.addEventListener('input', () => {
-    updatePanelContent();
-  });
-  
-  searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      updatePanelContent();
-    }
-  });
-  
-  // Prevent panel clicks from closing the panel
-  panel.addEventListener('mousedown', (e) => {
-    e.stopPropagation();
-  });
-  
-  panel.addEventListener('click', (e) => {
-    e.stopPropagation();
-  });
-}
-
-function setupResizeHandle() {
-  const resizeHandle = panel.querySelector('.ctn-resize-handle');
-  let startX, startY, startWidth, startHeight;
-  
-  resizeHandle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    isResizing = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    
-    const rect = panel.getBoundingClientRect();
-    startWidth = rect.width;
-    startHeight = rect.height;
-    
-    document.addEventListener('mousemove', handleResize);
-    document.addEventListener('mouseup', stopResize);
-  });
-  
-  function handleResize(e) {
-    if (!isResizing) return;
-    
-    const newWidth = Math.max(300, Math.min(window.innerWidth * 0.8, startWidth + e.clientX - startX));
-    const newHeight = Math.max(300, Math.min(window.innerHeight * 0.8, startHeight + e.clientY - startY));
-    
-    panel.style.width = newWidth + 'px';
-    panel.style.height = newHeight + 'px';
-    
-    const rect = panel.getBoundingClientRect();
-    if (rect.left < 0) panel.style.right = '20px';
-    if (rect.top < 0) panel.style.bottom = '180px';
-  }
-  
-  function stopResize() {
-    isResizing = false;
-    document.removeEventListener('mousemove', handleResize);
-    document.removeEventListener('mouseup', stopResize);
-    
-    const rect = panel.getBoundingClientRect();
-    saveSettings({
-      panelWidth: rect.width,
-      panelHeight: rect.height
-    });
-  }
-}
-
-function switchTab(tabName) {
-  currentTab = tabName;
-  
-  panel.querySelectorAll('.ctn-tab').forEach(tab => {
-    if (tab.getAttribute('data-tab') === tabName) {
-      tab.classList.add('active');
-    } else {
-      tab.classList.remove('active');
-    }
-  });
-  
-  const searchInput = panel.querySelector('.ctn-search-input');
-  const placeholders = {
-    keywords: 'Filter all messages...',
-    user: 'Filter my posts...',
-    assistant: 'Filter AI answers...'
-  };
-  searchInput.placeholder = placeholders[tabName] || '';
-  
-  clearHighlights();
-  updatePanelContent();
-}
-
-function createJumpButton() {
-  debug('Creating jump button');
-  
-  jumpButton = document.createElement('button');
-  jumpButton.className = 'ctn-jump-button';
-  jumpButton.title = 'Thread Jump';
-  
-  jumpButton.innerHTML = '📋';
-  jumpButton.style.fontSize = '24px';
-  jumpButton.style.lineHeight = '50px';
-  
-  jumpButton.addEventListener('click', (e) => {
-    e.stopPropagation();
-    togglePanel();
-  });
-  
-  document.body.appendChild(jumpButton);
-  debug('Jump button added to DOM');
-}
-
-function togglePanel() {
-  if (panel && panel.style.display !== 'none') {
-    closePanel();
-  } else {
-    openPanel();
-  }
-}
-
-async function openPanel() {
-  if (!panel) {
-    await createPanel();
-  }
-  
-  panel.style.display = 'flex';
-  
-  const searchInput = panel.querySelector('.ctn-search-input');
-  if (searchInput) {
-    requestAnimationFrame(() => searchInput.focus());
-  }
-  
-  requestAnimationFrame(() => {
-    document.addEventListener('mousedown', handleOutsideClick);
-  });
-}
-
-function closePanel() {
-  if (panel) {
-    panel.style.display = 'none';
-    clearHighlights();
-    document.removeEventListener('mousedown', handleOutsideClick);
-  }
-}
-
-function handleOutsideClick(e) {
-  if (!panel || !jumpButton) return;
-  
-  if (!panel.contains(e.target) && !jumpButton.contains(e.target)) {
-    closePanel();
-  }
-}
-
-function handleKeyboard(e) {
-  if (e.key === 'Escape' && panel && panel.style.display !== 'none') {
-    e.preventDefault();
-    closePanel();
-  }
-}
-
-function setupContentObserver() {
-  const observer = new MutationObserver((mutations) => {
-    let shouldUpdate = false;
-    
-    mutations.forEach(mutation => {
-      if (mutation.type === 'childList') {
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            if (node.matches && (node.matches('[data-message-id]') || node.querySelector('[data-message-id]'))) {
-              shouldUpdate = true;
-            }
-          }
-        });
-      }
-    });
-    
-    if (shouldUpdate && panel && panel.style.display !== 'none') {
-      updatePanelContent();
-    }
-  });
-  
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-  
-  return observer;
-}
-
-function setupThemeObserver() {
-  const observer = new MutationObserver(() => {
-    if (panel) {
-      if (isDarkMode()) {
-        panel.classList.add('dark');
-      } else {
-        panel.classList.remove('dark');
-      }
-    }
-  });
-  
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['class']
-  });
-  
-  observer.observe(document.body, {
-    attributes: true,
-    attributeFilter: ['class']
-  });
-  
-  return observer;
-}
-
-function cleanup() {
-  clearHighlights();
-  
-  if (panel) {
-    panel.remove();
-    panel = null;
-  }
-  
-  if (jumpButton) {
-    jumpButton.remove();
-    jumpButton = null;
-  }
-  
-  document.removeEventListener('keydown', handleKeyboard);
-  document.removeEventListener('mousedown', handleOutsideClick);
-}
-
-function initialize() {
-  debug('Initializing ChatGPT Thread Jump extension');
-  
-  cleanup();
-  createJumpButton();
-  
-  document.addEventListener('keydown', handleKeyboard);
-  setupContentObserver();
-  setupThemeObserver();
-  
-  debug('Extension initialized successfully');
-}
-
-// Initialize when ready
-debug('Document ready state:', document.readyState);
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initialize);
-  debug('Added DOMContentLoaded listener');
-} else {
-  initialize();
-}
-
-debug('Script setup complete');
