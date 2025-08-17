@@ -415,15 +415,26 @@ async function createPanel() {
   updatePanelContent();
 }
 
-// Setup resize handle
+// Setup resize handle with improved usability
 function setupResizeHandle(resizeHandle) {
   let startX, startY, startWidth, startHeight;
+  let mouseMoveThreshold = 0; // マウス移動の閾値をなくす
+  let isMouseDown = false;
   
-  resizeHandle.addEventListener('mousedown', function(e) {
+  // リサイズハンドルとパネルの右下端の両方でリサイズを開始できるようにする
+  function addResizeListeners(element) {
+    element.addEventListener('mousedown', startResize);
+  }
+  
+  function startResize(e) {
+    // 右クリックは無視
+    if (e.button !== 0) return;
+    
     e.preventDefault();
     e.stopPropagation();
     
     debug('Resize started');
+    isMouseDown = true;
     isResizing = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -432,39 +443,53 @@ function setupResizeHandle(resizeHandle) {
     startWidth = rect.width;
     startHeight = rect.height;
     
-    // イベントリスナーを追加
-    document.addEventListener('mousemove', handleResize);
+    // パネルにリサイズ中のクラスを追加
+    panel.classList.add('resizing');
+    
+    // グローバルイベントリスナーを追加
+    document.addEventListener('mousemove', handleResize, { passive: false });
     document.addEventListener('mouseup', stopResize);
     
-    // カーソルを変更
+    // リサイズ中の視覚的フィードバック
     document.body.style.cursor = 'se-resize';
     document.body.style.userSelect = 'none';
-  });
+    document.body.style.pointerEvents = 'none';
+    panel.style.pointerEvents = 'auto';
+    
+    // 他のすべての要素の pointer-events を無効化
+    document.querySelectorAll('*').forEach(el => {
+      if (!el.closest('.ctn-panel')) {
+        el.style.pointerEvents = 'none';
+      }
+    });
+  }
   
   function handleResize(e) {
-    if (!isResizing) return;
+    if (!isResizing || !isMouseDown) return;
     
     e.preventDefault();
+    e.stopPropagation();
     
     const deltaX = e.clientX - startX;
     const deltaY = e.clientY - startY;
     
-    const newWidth = Math.max(300, Math.min(window.innerWidth * 0.8, startWidth + deltaX));
-    const newHeight = Math.max(300, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
+    // より滑らかなリサイズ（小さな動きでも反応）
+    const newWidth = Math.max(300, Math.min(window.innerWidth * 0.9, startWidth + deltaX));
+    const newHeight = Math.max(300, Math.min(window.innerHeight * 0.9, startHeight + deltaY));
     
-    // スタイルを直接設定（!importantを上書き）
+    // リアルタイムでサイズを更新
     panel.style.setProperty('width', newWidth + 'px', 'important');
     panel.style.setProperty('height', newHeight + 'px', 'important');
     
     debug('Resizing to:', newWidth, newHeight);
     
-    // Keep panel on screen
+    // パネルが画面外に出ないように調整
     const rect = panel.getBoundingClientRect();
-    if (rect.left < 0) {
+    if (rect.left < 10) {
       panel.style.setProperty('right', '20px', 'important');
       panel.style.removeProperty('left');
     }
-    if (rect.top < 0) {
+    if (rect.top < 10) {
       panel.style.setProperty('bottom', '180px', 'important');
       panel.style.removeProperty('top');
     }
@@ -474,23 +499,62 @@ function setupResizeHandle(resizeHandle) {
     if (!isResizing) return;
     
     debug('Resize stopped');
+    isMouseDown = false;
     isResizing = false;
+    
+    // クラスを削除
+    panel.classList.remove('resizing');
     
     // イベントリスナーを削除
     document.removeEventListener('mousemove', handleResize);
     document.removeEventListener('mouseup', stopResize);
     
-    // カーソルを戻す
+    // スタイルを復元
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    document.body.style.pointerEvents = '';
     
-    // Save settings
+    // すべての要素のpointer-eventsを復元
+    document.querySelectorAll('*').forEach(el => {
+      el.style.pointerEvents = '';
+    });
+    
+    // 設定を保存
     const rect = panel.getBoundingClientRect();
     saveSettings({
-      panelWidth: rect.width,
-      panelHeight: rect.height
+      panelWidth: Math.round(rect.width),
+      panelHeight: Math.round(rect.height)
     });
+    
+    debug('Final size saved:', Math.round(rect.width), Math.round(rect.height));
   }
+  
+  // リサイズハンドル自体にリスナーを追加
+  addResizeListeners(resizeHandle);
+  
+  // パネルの右下エリアにもリサイズ機能を追加
+  panel.addEventListener('mousedown', function(e) {
+    const rect = panel.getBoundingClientRect();
+    const isInResizeArea = (
+      e.clientX > rect.right - 40 && 
+      e.clientY > rect.bottom - 40
+    );
+    
+    if (isInResizeArea) {
+      startResize(e);
+    }
+  });
+  
+  // より良いホバー効果
+  resizeHandle.addEventListener('mouseenter', function() {
+    document.body.style.cursor = 'se-resize';
+  });
+  
+  resizeHandle.addEventListener('mouseleave', function() {
+    if (!isResizing) {
+      document.body.style.cursor = '';
+    }
+  });
 }
 
 // Switch tab
