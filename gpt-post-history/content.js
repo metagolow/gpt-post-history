@@ -1,12 +1,68 @@
-// ChatGPT Thread Jump - Minimal CSP Safe Version
-console.log('[CTN] Script started');
+// ChatGPT Thread Jump - ダークモード対応版
+console.log('[CTN] Script started - Dark Mode Compatible');
 
 // Global variables
 let panel = null;
 let jumpButton = null;
 let currentTab = 'keywords';
+let currentHighlights = [];
+let currentHighlightIndex = -1;
+let isResizing = false;
 
-// Create jump button
+// Utility functions
+function debug(...args) {
+  console.debug('[CTN]', ...args);
+}
+
+function isDarkMode() {
+  return document.documentElement.classList.contains('dark') ||
+         document.body.classList.contains('dark') ||
+         document.documentElement.getAttribute('data-theme') === 'dark' ||
+         getComputedStyle(document.documentElement).getPropertyValue('color-scheme').includes('dark');
+}
+
+// Storage functions (using localStorage as fallback)
+async function saveSettings(settings) {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      await chrome.storage.local.set(settings);
+    } else {
+      // Fallback to localStorage
+      Object.keys(settings).forEach(key => {
+        localStorage.setItem('ctn_' + key, JSON.stringify(settings[key]));
+      });
+    }
+    debug('Settings saved:', settings);
+  } catch (error) {
+    debug('Failed to save settings:', error);
+  }
+}
+
+async function loadSettings() {
+  try {
+    let settings;
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      const result = await chrome.storage.local.get(['panelWidth', 'panelHeight']);
+      settings = {
+        panelWidth: result.panelWidth || 400,
+        panelHeight: result.panelHeight || 500
+      };
+    } else {
+      // Fallback to localStorage
+      settings = {
+        panelWidth: JSON.parse(localStorage.getItem('ctn_panelWidth')) || 400,
+        panelHeight: JSON.parse(localStorage.getItem('ctn_panelHeight')) || 500
+      };
+    }
+    debug('Settings loaded:', settings);
+    return settings;
+  } catch (error) {
+    debug('Failed to load settings:', error);
+    return { panelWidth: 400, panelHeight: 500 };
+  }
+}
+
+// Create jump button with enhanced dark mode support
 function createJumpButton() {
   console.log('[CTN] Creating button');
   
@@ -14,23 +70,6 @@ function createJumpButton() {
   jumpButton.className = 'ctn-jump-button';
   jumpButton.title = 'Thread Jump';
   jumpButton.innerHTML = '📋';
-  
-  // Set styles directly
-  jumpButton.style.position = 'fixed';
-  jumpButton.style.bottom = '120px';
-  jumpButton.style.right = '20px';
-  jumpButton.style.width = '50px';
-  jumpButton.style.height = '50px';
-  jumpButton.style.background = '#2563eb';
-  jumpButton.style.border = 'none';
-  jumpButton.style.borderRadius = '25px';
-  jumpButton.style.fontSize = '24px';
-  jumpButton.style.color = 'white';
-  jumpButton.style.cursor = 'pointer';
-  jumpButton.style.zIndex = '2147483647';
-  jumpButton.style.display = 'flex';
-  jumpButton.style.alignItems = 'center';
-  jumpButton.style.justifyContent = 'center';
   
   jumpButton.addEventListener('click', function(e) {
     e.stopPropagation();
@@ -41,9 +80,173 @@ function createJumpButton() {
   console.log('[CTN] Button created');
 }
 
+// Message extraction functions
+function getMessageElements() {
+  const messages = [];
+  const messageElements = document.querySelectorAll('[data-message-id]');
+  
+  debug('Found message elements:', messageElements.length);
+  
+  messageElements.forEach(function(el, index) {
+    try {
+      const messageId = el.getAttribute('data-message-id');
+      if (!messageId) return;
+      
+      let role = el.getAttribute('data-message-author-role');
+      
+      if (!role) {
+        // Enhanced role detection for ChatGPT
+        const userIndicators = el.querySelector('[data-testid="conversation-turn-user"]') || 
+                              el.querySelector('.font-semibold') ||
+                              el.querySelector('img[alt*="User"]');
+        const assistantIndicators = el.querySelector('[data-testid="conversation-turn-assistant"]') ||
+                                   el.querySelector('svg[data-icon="openai"]') ||
+                                   el.querySelector('.gizmo-bot-avatar');
+        
+        if (userIndicators) {
+          role = 'user';
+        } else if (assistantIndicators) {
+          role = 'assistant';
+        } else {
+          // Fallback to alternating pattern
+          const textContent = el.textContent.trim();
+          if (textContent.length > 0) {
+            role = index % 2 === 0 ? 'user' : 'assistant';
+          }
+        }
+      }
+      
+      if (!role) return;
+      
+      const textContent = extractTextContent(el);
+      if (textContent.trim().length === 0) return;
+      
+      const snippet = textContent.slice(0, 140).trim();
+      const finalSnippet = snippet + (textContent.length > 140 ? '...' : '');
+      
+      messages.push({
+        element: el,
+        messageId: messageId,
+        role: role,
+        text: textContent.toLowerCase(),
+        snippet: finalSnippet
+      });
+    } catch (error) {
+      debug('Error processing message element:', error);
+    }
+  });
+  
+  debug('Processed messages:', messages.length);
+  return messages;
+}
+
+function extractTextContent(element) {
+  const clone = element.cloneNode(true);
+  
+  // Remove UI elements and extension-specific content
+  const uiSelectors = [
+    '.ctn-panel',
+    '.ctn-jump-button',
+    'button[aria-label]',
+    '[role="button"]',
+    '.copy-button',
+    '.regenerate-button',
+    '.feedback-button',
+    '[data-testid*="button"]'
+  ];
+  
+  uiSelectors.forEach(function(selector) {
+    const elements = clone.querySelectorAll(selector);
+    elements.forEach(function(el) {
+      el.remove();
+    });
+  });
+  
+  return clone.textContent || '';
+}
+
+// Enhanced scroll functions
+function findScrollableRoot(target) {
+  debug('Finding scrollable root for:', target);
+  
+  const candidates = [
+    document.querySelector('#__next main'),
+    document.querySelector('main[role="main"]'),
+    document.querySelector('main'),
+    document.querySelector('.chat-container'),
+    document.scrollingElement,
+    document.documentElement,
+    document.body
+  ];
+  
+  let parent = target.parentElement;
+  while (parent && parent !== document.body) {
+    candidates.unshift(parent);
+    parent = parent.parentElement;
+  }
+  
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    
+    try {
+      const style = getComputedStyle(candidate);
+      const overflowY = style.overflowY;
+      
+      if (candidate.scrollHeight > candidate.clientHeight && 
+          (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')) {
+        
+        const originalScrollTop = candidate.scrollTop;
+        candidate.scrollTop += 1;
+        const canScroll = candidate.scrollTop !== originalScrollTop;
+        candidate.scrollTop = originalScrollTop;
+        
+        if (canScroll) {
+          debug('Found scrollable root:', candidate);
+          return candidate;
+        }
+      }
+    } catch (error) {
+      debug('Error testing scroll candidate:', error);
+    }
+  }
+  
+  debug('Using window as fallback scroll root');
+  return window;
+}
+
+function scrollToElement(element) {
+  debug('Scrolling to element:', element);
+  
+  const scrollRoot = findScrollableRoot(element);
+  const targetRect = element.getBoundingClientRect();
+  
+  if (scrollRoot === window) {
+    const offsetTop = targetRect.top + window.pageYOffset;
+    const windowCenter = window.innerHeight / 2;
+    const scrollPosition = offsetTop - windowCenter;
+    
+    window.scrollTo({
+      top: Math.max(0, scrollPosition),
+      behavior: 'smooth'
+    });
+  } else {
+    const containerRect = scrollRoot.getBoundingClientRect();
+    const relativeTop = targetRect.top - containerRect.top;
+    const scrollCenter = scrollRoot.clientHeight / 2;
+    const newScrollTop = scrollRoot.scrollTop + relativeTop - scrollCenter;
+    
+    scrollRoot.scrollTo({
+      top: Math.max(0, newScrollTop),
+      behavior: 'smooth'
+    });
+  }
+}
+
 // Toggle panel
 function togglePanel() {
-  if (panel && panel.style.display !== 'none') {
+  debug('Toggle panel called. Current display:', panel ? panel.style.display : 'null');
+  
+  if (panel && panel.style.display !== 'none' && panel.style.visibility !== 'hidden') {
     closePanel();
   } else {
     openPanel();
@@ -51,27 +254,46 @@ function togglePanel() {
 }
 
 // Open panel
-function openPanel() {
+async function openPanel() {
   if (!panel) {
-    createPanel();
+    await createPanel();
   }
+  
+  // 表示設定を明示的に行う
   panel.style.display = 'flex';
+  panel.style.visibility = 'visible';
+  panel.style.opacity = '1';
+  
+  // Update dark mode class
+  if (isDarkMode()) {
+    panel.classList.add('dark');
+  } else {
+    panel.classList.remove('dark');
+  }
+  
+  debug('Panel opened');
   
   // Focus search input
   const searchInput = panel.querySelector('.ctn-search-input');
   if (searchInput) {
-    searchInput.focus();
+    requestAnimationFrame(function() {
+      searchInput.focus();
+    });
   }
   
   // Add outside click listener
-  document.addEventListener('mousedown', handleOutsideClick);
+  requestAnimationFrame(function() {
+    document.addEventListener('mousedown', handleOutsideClick);
+  });
 }
 
 // Close panel
 function closePanel() {
   if (panel) {
     panel.style.display = 'none';
+    panel.style.visibility = 'hidden';
     document.removeEventListener('mousedown', handleOutsideClick);
+    debug('Panel closed');
   }
 }
 
@@ -79,47 +301,41 @@ function closePanel() {
 function handleOutsideClick(e) {
   if (!panel || !jumpButton) return;
   
+  // パネルが非表示の場合は処理しない
+  if (panel.style.display === 'none' || panel.style.visibility === 'hidden') {
+    return;
+  }
+  
   if (!panel.contains(e.target) && !jumpButton.contains(e.target)) {
     closePanel();
   }
 }
 
-// Create panel
-function createPanel() {
+// Create panel with CSS classes
+async function createPanel() {
+  const settings = await loadSettings();
+  
   panel = document.createElement('div');
   panel.className = 'ctn-panel';
+  if (isDarkMode()) {
+    panel.classList.add('dark');
+  }
   
-  // Set panel styles
-  panel.style.position = 'fixed';
-  panel.style.bottom = '180px';
-  panel.style.right = '20px';
-  panel.style.width = '400px';
-  panel.style.height = '500px';
-  panel.style.background = 'white';
-  panel.style.border = '1px solid #d1d5db';
-  panel.style.borderRadius = '12px';
-  panel.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.2)';
-  panel.style.zIndex = '2147483647';
-  panel.style.display = 'flex';
-  panel.style.flexDirection = 'column';
-  panel.style.overflow = 'hidden';
-  panel.style.resize = 'both';
-  panel.style.minWidth = '300px';
-  panel.style.minHeight = '300px';
-  panel.style.maxWidth = '80vw';
-  panel.style.maxHeight = '80vh';
+  // 初期サイズを設定（!importantを上書きできるように）
+  panel.style.setProperty('width', settings.panelWidth + 'px', 'important');
+  panel.style.setProperty('height', settings.panelHeight + 'px', 'important');
+  panel.style.setProperty('display', 'flex', 'important');
+  panel.style.setProperty('visibility', 'visible', 'important');
+  
+  debug('Creating panel with size:', settings.panelWidth, settings.panelHeight);
   
   // Create header
   const header = document.createElement('div');
-  header.style.padding = '16px';
-  header.style.borderBottom = '1px solid #e5e7eb';
-  header.style.background = '#f9fafb';
+  header.className = 'ctn-panel-header';
   
   // Create tabs
   const tabsContainer = document.createElement('div');
-  tabsContainer.style.display = 'flex';
-  tabsContainer.style.gap = '4px';
-  tabsContainer.style.marginBottom = '12px';
+  tabsContainer.className = 'ctn-tabs';
   
   const tabData = [
     { id: 'keywords', text: 'All', active: true },
@@ -129,26 +345,9 @@ function createPanel() {
   
   tabData.forEach(function(tabInfo) {
     const tab = document.createElement('button');
-    tab.textContent = tabInfo.text;
+    tab.className = 'ctn-tab' + (tabInfo.active ? ' active' : '');
     tab.setAttribute('data-tab', tabInfo.id);
-    
-    // Tab styles
-    tab.style.padding = '4px 8px';
-    tab.style.border = '1px solid #d1d5db';
-    tab.style.borderRadius = '4px';
-    tab.style.cursor = 'pointer';
-    tab.style.fontSize = '11px';
-    tab.style.fontWeight = '500';
-    tab.style.whiteSpace = 'nowrap';
-    
-    if (tabInfo.active) {
-      tab.style.background = '#10a37f';
-      tab.style.color = 'white';
-      tab.style.borderColor = '#10a37f';
-    } else {
-      tab.style.background = 'white';
-      tab.style.color = 'black';
-    }
+    tab.textContent = tabInfo.text;
     
     tab.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -158,97 +357,44 @@ function createPanel() {
     tabsContainer.appendChild(tab);
   });
   
-  // Create search input
+  // Create search container
+  const searchContainer = document.createElement('div');
+  searchContainer.className = 'ctn-search-container';
+  
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.className = 'ctn-search-input';
   searchInput.placeholder = 'Filter all messages...';
-  searchInput.style.width = '100%';
-  searchInput.style.padding = '8px 12px';
-  searchInput.style.border = '1px solid #d1d5db';
-  searchInput.style.borderRadius = '6px';
-  searchInput.style.fontSize = '14px';
-  searchInput.style.outline = 'none';
   
   searchInput.addEventListener('input', function() {
     updatePanelContent();
   });
   
+  searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      updatePanelContent();
+    }
+  });
+  
+  searchContainer.appendChild(searchInput);
+  
   header.appendChild(tabsContainer);
-  header.appendChild(searchInput);
+  header.appendChild(searchContainer);
   
   // Create body
   const body = document.createElement('div');
-  body.style.flex = '1';
-  body.style.overflowY = 'auto';
-  body.style.padding = '12px';
+  body.className = 'ctn-panel-body';
   
   const snippetList = document.createElement('div');
   snippetList.className = 'ctn-snippet-list';
-  snippetList.style.display = 'flex';
-  snippetList.style.flexDirection = 'column';
-  snippetList.style.gap = '8px';
-  
   body.appendChild(snippetList);
   
   // Create resize handle
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'ctn-resize-handle';
-  resizeHandle.style.position = 'absolute';
-  resizeHandle.style.bottom = '0';
-  resizeHandle.style.right = '0';
-  resizeHandle.style.width = '20px';
-  resizeHandle.style.height = '20px';
-  resizeHandle.style.cursor = 'se-resize';
-  resizeHandle.style.background = 'linear-gradient(-45deg, transparent 0%, transparent 25%, #ccc 25%, #ccc 30%, transparent 30%, transparent 50%, #ccc 50%, #ccc 55%, transparent 55%, transparent 75%, #ccc 75%, #ccc 80%, transparent 80%)';
-  resizeHandle.style.borderBottomRightRadius = '12px';
-  
-  // Add resize functionality
-  let isResizing = false;
-  let startX, startY, startWidth, startHeight;
-  
-  resizeHandle.addEventListener('mousedown', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    isResizing = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    
-    const rect = panel.getBoundingClientRect();
-    startWidth = rect.width;
-    startHeight = rect.height;
-    
-    document.addEventListener('mousemove', handleResize);
-    document.addEventListener('mouseup', stopResize);
-  });
-  
-  function handleResize(e) {
-    if (!isResizing) return;
-    
-    const newWidth = Math.max(300, Math.min(window.innerWidth * 0.8, startWidth + e.clientX - startX));
-    const newHeight = Math.max(300, Math.min(window.innerHeight * 0.8, startHeight + e.clientY - startY));
-    
-    panel.style.width = newWidth + 'px';
-    panel.style.height = newHeight + 'px';
-    
-    // Keep panel on screen
-    const rect = panel.getBoundingClientRect();
-    if (rect.left < 0) {
-      panel.style.right = '20px';
-      panel.style.left = 'auto';
-    }
-    if (rect.top < 0) {
-      panel.style.bottom = '180px';
-      panel.style.top = 'auto';
-    }
-  }
-  
-  function stopResize() {
-    isResizing = false;
-    document.removeEventListener('mousemove', handleResize);
-    document.removeEventListener('mouseup', stopResize);
-  }
+  setupResizeHandle(resizeHandle);
   
   panel.appendChild(header);
   panel.appendChild(body);
@@ -261,7 +407,90 @@ function createPanel() {
     e.stopPropagation();
   });
   
+  panel.addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
+  
+  debug('Panel created and added to DOM');
   updatePanelContent();
+}
+
+// Setup resize handle
+function setupResizeHandle(resizeHandle) {
+  let startX, startY, startWidth, startHeight;
+  
+  resizeHandle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    debug('Resize started');
+    isResizing = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    
+    const rect = panel.getBoundingClientRect();
+    startWidth = rect.width;
+    startHeight = rect.height;
+    
+    // イベントリスナーを追加
+    document.addEventListener('mousemove', handleResize);
+    document.addEventListener('mouseup', stopResize);
+    
+    // カーソルを変更
+    document.body.style.cursor = 'se-resize';
+    document.body.style.userSelect = 'none';
+  });
+  
+  function handleResize(e) {
+    if (!isResizing) return;
+    
+    e.preventDefault();
+    
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+    
+    const newWidth = Math.max(300, Math.min(window.innerWidth * 0.8, startWidth + deltaX));
+    const newHeight = Math.max(300, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
+    
+    // スタイルを直接設定（!importantを上書き）
+    panel.style.setProperty('width', newWidth + 'px', 'important');
+    panel.style.setProperty('height', newHeight + 'px', 'important');
+    
+    debug('Resizing to:', newWidth, newHeight);
+    
+    // Keep panel on screen
+    const rect = panel.getBoundingClientRect();
+    if (rect.left < 0) {
+      panel.style.setProperty('right', '20px', 'important');
+      panel.style.removeProperty('left');
+    }
+    if (rect.top < 0) {
+      panel.style.setProperty('bottom', '180px', 'important');
+      panel.style.removeProperty('top');
+    }
+  }
+  
+  function stopResize(e) {
+    if (!isResizing) return;
+    
+    debug('Resize stopped');
+    isResizing = false;
+    
+    // イベントリスナーを削除
+    document.removeEventListener('mousemove', handleResize);
+    document.removeEventListener('mouseup', stopResize);
+    
+    // カーソルを戻す
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    
+    // Save settings
+    const rect = panel.getBoundingClientRect();
+    saveSettings({
+      panelWidth: rect.width,
+      panelHeight: rect.height
+    });
+  }
 }
 
 // Switch tab
@@ -269,71 +498,28 @@ function switchTab(tabName) {
   currentTab = tabName;
   
   // Update tab styles
-  const tabs = panel.querySelectorAll('[data-tab]');
+  const tabs = panel.querySelectorAll('.ctn-tab');
   tabs.forEach(function(tab) {
     if (tab.getAttribute('data-tab') === tabName) {
-      tab.style.background = '#10a37f';
-      tab.style.color = 'white';
-      tab.style.borderColor = '#10a37f';
+      tab.classList.add('active');
     } else {
-      tab.style.background = 'white';
-      tab.style.color = 'black';
-      tab.style.borderColor = '#d1d5db';
+      tab.classList.remove('active');
     }
   });
   
   // Update placeholder
   const searchInput = panel.querySelector('.ctn-search-input');
-  if (tabName === 'keywords') {
-    searchInput.placeholder = 'Filter all messages...';
-  } else if (tabName === 'user') {
-    searchInput.placeholder = 'Filter my posts...';
-  } else if (tabName === 'assistant') {
-    searchInput.placeholder = 'Filter AI answers...';
-  }
+  const placeholders = {
+    keywords: 'Filter all messages...',
+    user: 'Filter my posts...',
+    assistant: 'Filter AI answers...'
+  };
+  searchInput.placeholder = placeholders[tabName] || '';
   
   updatePanelContent();
 }
 
-// Get messages
-function getMessageElements() {
-  const messages = [];
-  const messageElements = document.querySelectorAll('[data-message-id]');
-  
-  messageElements.forEach(function(el, index) {
-    const messageId = el.getAttribute('data-message-id');
-    if (!messageId) return;
-    
-    let role = el.getAttribute('data-message-author-role');
-    
-    if (!role) {
-      // Simple role detection
-      if (index % 2 === 0) {
-        role = 'user';
-      } else {
-        role = 'assistant';
-      }
-    }
-    
-    const textContent = el.textContent || '';
-    if (textContent.trim().length === 0) return;
-    
-    const snippet = textContent.slice(0, 140).trim();
-    const finalSnippet = snippet + (textContent.length > 140 ? '...' : '');
-    
-    messages.push({
-      element: el,
-      messageId: messageId,
-      role: role,
-      text: textContent.toLowerCase(),
-      snippet: finalSnippet
-    });
-  });
-  
-  return messages;
-}
-
-// Update panel content
+// Update panel content with improved text visibility
 function updatePanelContent() {
   const snippetList = panel.querySelector('.ctn-snippet-list');
   const searchInput = panel.querySelector('.ctn-search-input');
@@ -368,59 +554,49 @@ function updatePanelContent() {
   // Show results
   if (filteredMessages.length === 0) {
     const noResults = document.createElement('div');
+    noResults.className = 'ctn-no-results';
     noResults.textContent = searchTerm ? 'No messages found' : 'No messages found';
-    noResults.style.textAlign = 'center';
-    noResults.style.color = '#6b7280';
-    noResults.style.fontStyle = 'italic';
-    noResults.style.padding = '32px';
     snippetList.appendChild(noResults);
     return;
   }
   
   filteredMessages.forEach(function(message) {
     const item = document.createElement('div');
-    item.style.padding = '12px';
-    item.style.border = '1px solid #e5e7eb';
-    item.style.borderRadius = '8px';
-    item.style.cursor = 'pointer';
-    item.style.background = 'white';
-    item.style.fontSize = '13px';
-    item.style.lineHeight = '1.4';
-    
-    // Hover effect
-    item.addEventListener('mouseenter', function() {
-      item.style.background = '#f3f4f6';
-      item.style.borderColor = '#10a37f';
-    });
-    
-    item.addEventListener('mouseleave', function() {
-      item.style.background = 'white';
-      item.style.borderColor = '#e5e7eb';
-    });
+    item.className = 'ctn-snippet-item';
     
     // Create label
     const label = document.createElement('span');
-    label.textContent = message.role === 'user' ? '[You]' : '[AI]';
-    label.style.display = 'inline-block';
-    label.style.padding = '2px 6px';
-    label.style.borderRadius = '4px';
-    label.style.fontSize = '10px';
-    label.style.fontWeight = 'bold';
-    label.style.marginRight = '8px';
-    label.style.marginBottom = '4px';
+    label.className = 'ctn-snippet-label ' + message.role;
+    label.textContent = '[' + (message.role === 'user' ? 'You' : 'AI') + ']';
     
-    if (message.role === 'user') {
-      label.style.background = '#dbeafe';
-      label.style.color = '#1e40af';
-    } else {
-      label.style.background = '#dcfce7';
-      label.style.color = '#166534';
-    }
-    
-    // Create text
+    // Create text element with enhanced visibility
     const text = document.createElement('span');
-    text.textContent = message.snippet;
-    text.style.display = 'block';
+    text.className = 'ctn-snippet-text';
+    
+    // Apply search highlighting if needed
+    if (searchTerm) {
+      const lowerSnippet = message.snippet.toLowerCase();
+      const index = lowerSnippet.indexOf(searchTerm);
+      if (index !== -1) {
+        const before = message.snippet.substring(0, index);
+        const match = message.snippet.substring(index, index + searchTerm.length);
+        const after = message.snippet.substring(index + searchTerm.length);
+        
+        const beforeText = document.createTextNode(before);
+        const highlightElement = document.createElement('mark');
+        highlightElement.className = 'ctn-search-highlight';
+        highlightElement.textContent = match;
+        const afterText = document.createTextNode(after);
+        
+        text.appendChild(beforeText);
+        text.appendChild(highlightElement);
+        text.appendChild(afterText);
+      } else {
+        text.textContent = message.snippet;
+      }
+    } else {
+      text.textContent = message.snippet;
+    }
     
     item.appendChild(label);
     item.appendChild(text);
@@ -431,10 +607,7 @@ function updatePanelContent() {
       e.stopPropagation();
       
       // Scroll to element
-      message.element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
+      scrollToElement(message.element);
       
       // Close panel
       closePanel();
@@ -444,11 +617,100 @@ function updatePanelContent() {
   });
 }
 
+// Setup theme observer to handle dark mode changes
+function setupThemeObserver() {
+  const observer = new MutationObserver(function() {
+    if (panel) {
+      if (isDarkMode()) {
+        panel.classList.add('dark');
+      } else {
+        panel.classList.remove('dark');
+      }
+    }
+  });
+  
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'data-theme']
+  });
+  
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class', 'data-theme']
+  });
+  
+  return observer;
+}
+
+// Setup content observer for dynamic updates
+function setupContentObserver() {
+  const observer = new MutationObserver(function(mutations) {
+    let shouldUpdate = false;
+    
+    mutations.forEach(function(mutation) {
+      if (mutation.type === 'childList') {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.matches && (node.matches('[data-message-id]') || node.querySelector('[data-message-id]'))) {
+              shouldUpdate = true;
+            }
+          }
+        });
+      }
+    });
+    
+    if (shouldUpdate && panel && panel.style.display !== 'none') {
+      updatePanelContent();
+    }
+  });
+  
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  
+  return observer;
+}
+
+// Keyboard handler
+function handleKeyboard(e) {
+  if (e.key === 'Escape' && panel && panel.style.display !== 'none') {
+    e.preventDefault();
+    closePanel();
+  }
+}
+
+// Cleanup function
+function cleanup() {
+  if (panel) {
+    panel.remove();
+    panel = null;
+  }
+  
+  if (jumpButton) {
+    jumpButton.remove();
+    jumpButton = null;
+  }
+  
+  document.removeEventListener('keydown', handleKeyboard);
+  document.removeEventListener('mousedown', handleOutsideClick);
+}
+
 // Initialize
 function initialize() {
-  console.log('[CTN] Initializing');
+  console.log('[CTN] Initializing with dark mode support');
+  
+  cleanup();
   createJumpButton();
-  console.log('[CTN] Initialized');
+  
+  // Setup event listeners
+  document.addEventListener('keydown', handleKeyboard);
+  
+  // Setup observers
+  setupContentObserver();
+  setupThemeObserver();
+  
+  console.log('[CTN] Initialized successfully');
 }
 
 // Start
@@ -458,4 +720,4 @@ if (document.readyState === 'loading') {
   initialize();
 }
 
-console.log('[CTN] Setup complete');
+console.log('[CTN] Setup complete with dark mode support');
